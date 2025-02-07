@@ -1,11 +1,21 @@
 # pragma version 0.4.0
 # @license MIT
 
-import Resolver
 from pcaversaccio.snekmate.src.snekmate.auth import ownable
 
 initializes: ownable
-implements: Resolver
+
+urls: public(DynArray[String[1024], 16])
+
+@external
+def popUrl() -> String[1024]:
+    assert msg.sender == ownable.owner, "unauthorized"
+    return self.urls.pop()
+
+@external
+def pushUrl(url: String[1024]):
+    assert msg.sender == ownable.owner, "unauthorized"
+    self.urls.append(url)
 
 @deploy
 def __init__():
@@ -57,13 +67,40 @@ def base58CheckIntoRawTronAddress(name: Bytes[64], length: uint256) -> bytes20:
 
 @external
 def resolve(name: Bytes[64], data: Bytes[1024]) -> Bytes[32]:
-    tronAddressLength: uint256 = convert(slice(name, 0, 1), uint256)
 
-    # a Tron address (base58-encoded 25 bytes) is between 22 and 35 chars long
-    # Source: https://chatgpt.com/share/67a60383-9340-8002-9d9c-218deb0f5a0c
-    assert tronAddressLength >= 22 and tronAddressLength <= 35, "invalid subdomain length"
+    # sig OffchainLookup(address,string[],bytes,bytes4,bytes) == 0x556f1830
+    # sig untronSubdomain(bytes,bytes) == 0xddf425a6
+    # ask to ping the relayer to bruteforce the case of the lowercased Tron address
+    # (ENS normalizes all names to lowercase but we need the proper case to decode the Tron address)
+    raw_revert(concat(b"\x55\x6f\x18\x30", abi_encode(self, self.urls, name, 0xddf425a6, name)))
 
-    tronAddress: bytes20 = self.base58CheckIntoRawTronAddress(slice(name, 1, tronAddressLength), tronAddressLength)
+@internal
+def extractSubdomain(fullDomain: Bytes[64]) -> (Bytes[64], uint256):
+    # ENS encodes the domains in DNS wire format, which is a set of length-prefixed strings
+    subdomainLength: uint256 = convert(slice(fullDomain, 0, 1), uint256)
 
+    # extract the subdomain from the full domain
+    subdomain: Bytes[64] = slice(fullDomain, 1, subdomainLength)
 
-    return abi_encode(tronAddress)
+    return subdomain, subdomainLength
+
+@internal
+def isThisJustLowercase(string: Bytes[64], lowercasedString: Bytes[64]) -> bool:
+    for i: uint256 in range(len(string), bound=64):
+        leftLetter: uint256 = convert(slice(string, i, 1), uint256)
+        rightLetter: uint256 = convert(slice(lowercasedString, i, 1), uint256)
+        if leftLetter != rightLetter and leftLetter != rightLetter - 32:
+            return False
+    return True
+
+@external
+def untronSubdomain(serverResponse: Bytes[64], originalDomain: Bytes[64]) -> Bytes[32]:
+    
+    serverTronAddress: Bytes[64] = b""
+    serverTronAddressLength: uint256 = 0
+    serverTronAddress, serverTronAddressLength = self.extractSubdomain(serverResponse)
+    assert len(serverResponse) == len(originalDomain) and self.isThisJustLowercase(serverResponse, originalDomain), "server response is invalid"
+
+    tronAddress: bytes20 = self.base58CheckIntoRawTronAddress(serverTronAddress, serverTronAddressLength)
+
+    return abi_encode(convert(tronAddress, address))

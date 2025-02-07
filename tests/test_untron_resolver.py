@@ -21,9 +21,21 @@ def test_base58decode(untron_resolver_contract):
     print(address[1:-4], canonical_encoding, result)
     assert result == address[1:-4]
 
+def test_lowercase_string(untron_resolver_contract):
+    string = b"HelLo"
+    lowercased_string = string.lower()
+    result = untron_resolver_contract.internal.isThisJustLowercase(string, lowercased_string)
+    assert result
+
 def test_resolve(untron_resolver_contract):
-    raw_address = b'A1\xab\xf6\xca,\xd3\x95f\xad\x8a"\x159\xc87P\x93\xd9\x8e\x97\x04&\xc5\x96'
-    address = base58_encode(raw_address).encode()
-    query = bytes([len(address)]) + address + b"\x06totron\x03eth"
-    result = untron_resolver_contract.resolve(query, b"")
-    assert b"\x41" + result[:20] == raw_address[:-4]
+    name = b"test.untron.eth"
+    data = b"test"
+    result = untron_resolver_contract.resolve(name, data)
+    assert result == b"test"
+
+def test_extract_subdomain(untron_resolver_contract):
+    full_domain = b'"TEVr7jCiRofduU2wtQsMWLBr1m132A3S5j\x06totron\x03eth\x00'
+    subdomain, subdomain_length = untron_resolver_contract.internal.extractSubdomain(full_domain)
+    assert subdomain == b"test"
+    assert subdomain_length == 4
+
