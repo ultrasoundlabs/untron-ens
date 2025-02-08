@@ -27,15 +27,16 @@ def test_lowercase_string(untron_resolver_contract):
     result = untron_resolver_contract.internal.isThisJustLowercase(string, lowercased_string)
     assert result
 
-def test_resolve(untron_resolver_contract):
-    name = b"test.untron.eth"
-    data = b"test"
-    result = untron_resolver_contract.resolve(name, data)
-    assert result == b"test"
+# # will revert bc of CCIP-Read
+# def test_resolve(untron_resolver_contract):
+#     name = b"test.untron.eth"
+#     data = b"test"
+#     result = untron_resolver_contract.resolve(name, data)
+#     assert result == b"test"
 
 def test_extract_subdomain(untron_resolver_contract):
     full_domain = b'"TEVr7jCiRofduU2wtQsMWLBr1m132A3S5j\x06totron\x03eth\x00'
     subdomain, subdomain_length = untron_resolver_contract.internal.extractSubdomain(full_domain)
-    assert subdomain == b"test"
-    assert subdomain_length == 4
+    assert subdomain == b"TEVr7jCiRofduU2wtQsMWLBr1m132A3S5j"
+    assert subdomain_length == 34
 
