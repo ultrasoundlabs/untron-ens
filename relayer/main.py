@@ -3,7 +3,15 @@ import json
 import logging
 from aiohttp import web
 import aiosqlite
+import base58
 from web3 import AsyncWeb3, AsyncHTTPProvider
+import os
+import subprocess
+
+os.chdir("base58bruteforce")
+os.system("cargo build --release")
+os.chdir("..")
+os.system("cp base58bruteforce/target/release/base58bruteforce binary")
 
 # ---------------------------
 # Configuration
@@ -62,23 +70,42 @@ async def setup_contracts():
 account = w3.eth.account.from_key(CONFIG["private_key"])
 
 # ---------------------------
+# Database Setup
+# ---------------------------
+async def setup_database():
+    async with aiosqlite.connect(DB_FILENAME) as db:
+        # Create receivers table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS receivers (
+                tron_address TEXT PRIMARY KEY,
+                receiver_address TEXT,
+                resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.commit()
+
+# ---------------------------
 # Helper Functions
 # ---------------------------
 async def fix_case(address: str) -> str:
     """
-    Placeholder to fix the case of an address.
-    For now, simply return the input.
+    Fixes the case of a Base58 address by running the base58bruteforce program
+    and capturing its output.
     """
-    # TODO: implement proper case fixing logic.
-    return address
+    result = subprocess.run(["./binary", address], 
+                          capture_output=True, 
+                          text=True)
+    if result.stdout:
+        return result.stdout.strip()
+    return ""
 
 async def generate_receiver_address(tron_address: str) -> str:
     """
     Calls the factory's generateReceiverAddress view function.
     Expects tron_address to be a hex string (with or without "0x") representing 20 bytes.
     """
-    addr_clean = tron_address[2:] if tron_address.startswith("0x") else tron_address
-    tron_bytes = bytes.fromhex(addr_clean)
+    print(tron_address)
+    tron_bytes = base58.b58decode_check(tron_address)[1:]
     receiver_address = await factory_contract.functions.generateReceiverAddress(tron_bytes).call()
     return receiver_address
 
@@ -87,9 +114,6 @@ async def store_resolved_pair(tron_address: str, receiver_address: str):
     Stores the Tron->receiver mapping in the SQLite database.
     """
     async with aiosqlite.connect(DB_FILENAME) as db:
-        await db.execute(
-            "CREATE TABLE IF NOT EXISTS receivers (tron_address TEXT PRIMARY KEY, receiver_address TEXT, resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-        )
         await db.execute(
             "INSERT OR IGNORE INTO receivers (tron_address, receiver_address) VALUES (?, ?)",
             (tron_address, receiver_address)
@@ -120,8 +144,10 @@ async def resolve_handler(request: web.Request):
         fixed_tron_address = await fix_case(lowercased_tron_address)
         receiver_address = await generate_receiver_address(fixed_tron_address)
         await store_resolved_pair(fixed_tron_address, receiver_address)
+        result = "0x" + (bytes([domain[0]]) + fixed_tron_address.encode() + domain[domain[0]+1:]).hex()
+        logger.info(f"Resolved {lowercased_tron_address} to {result}")
         return web.json_response({
-            "data": "0x" + (bytes([domain[0]]) + fixed_tron_address.encode() + domain[domain[0]+1:]).hex()
+            "data": result
         })
     except Exception as e:
         logger.exception("Error in resolve_handler")
@@ -190,6 +216,20 @@ async def call_intron(receiver_address: str):
         logger.exception(f"Error calling intron() on {receiver_address}: {e}")
         return None
 
+async def save_last_block(chain_name: str, block_number: int):
+    """Save the last processed block number for a given chain."""
+    os.makedirs("backups", exist_ok=True)
+    with open(f"backups/last_block_{chain_name}.txt", "w") as f:
+        f.write(str(block_number))
+
+async def load_last_block(chain_name: str) -> int:
+    """Load the last processed block number for a given chain."""
+    try:
+        with open(f"backups/last_block_{chain_name}.txt", "r") as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        return 0
+
 async def poll_transfers():
     """
     Background task that polls for Transfer events (from USDT and USDC contracts)
@@ -200,61 +240,96 @@ async def poll_transfers():
       - After a successful deployment, or if already deployed, call intron() on the receiver.
     """
     logger.info("Starting transfer polling background task")
-    last_block = await w3.eth.get_block_number()
+
+    # Get Transfer event signatures
+    transfer_event_signature = w3.keccak(text="Transfer(address,address,uint256)").hex()
+
     while True:
         try:
-            current_block = await w3.eth.get_block_number()
-            # Retrieve current mappings: key = receiver_address.lower(), value = tron_address.
+            # Retrieve current mappings: key = receiver_address.lower(), value = tron_address
             async with aiosqlite.connect(DB_FILENAME) as db:
                 async with db.execute("SELECT tron_address, receiver_address FROM receivers") as cursor:
                     rows = await cursor.fetchall()
                     mapping = {row[1].lower(): row[0] for row in rows}
                     receiver_addresses = list(mapping.keys())
+
             if receiver_addresses:
                 for token_contract in [usdt_contract, usdc_contract]:
-                    transfer_topic = token_contract.events.Transfer().signature
-                    filter_params = {
-                        "fromBlock": last_block + 1,
-                        "toBlock": current_block,
-                        "address": token_contract.address,
-                        "topics": [
-                            transfer_topic,
-                            None,
-                            [w3.toChecksumAddress(addr) for addr in receiver_addresses]
-                        ]
-                    }
-                    logs = await w3.eth.get_logs(filter_params)
-                    for log in logs:
-                        event = token_contract.events.Transfer().process_log(log)
-                        to_address = event["args"]["to"].lower()
-                        value = event["args"]["value"]
-                        logger.info(f"Detected Transfer of {value} tokens to {to_address}")
-                        tron_address = mapping.get(to_address)
-                        if not tron_address:
-                            logger.error(f"No tron_address mapping found for receiver {to_address}")
-                            continue
+                    token_name = "USDT" if token_contract.address == usdt_contract.address else "USDC"
+                    
+                    # Load last processed block
+                    last_block = await load_last_block(f"{token_name}_transfers") or await w3.eth.block_number
+                    current_block = await w3.eth.block_number
 
-                        # Check if the receiver contract is deployed.
-                        code = await w3.eth.get_code(to_address)
-                        if code in (b'', '0x', b'0x'):
-                            logger.info(f"Receiver contract {to_address} not deployed; deploying now for tron_address {tron_address}")
-                            deploy_receipt = await call_deploy(tron_address)
-                            if deploy_receipt is None:
-                                logger.error(f"Deployment failed for tron_address {tron_address}")
-                                continue
-                            # Optionally wait a few seconds for the deployment to propagate.
-                            await asyncio.sleep(5)
-                            code = await w3.eth.get_code(to_address)
-                            if code in (b'', '0x', b'0x'):
-                                logger.error(f"Deployment did not result in contract code at {to_address}")
+                    if current_block > last_block:
+                        chunk_size = 1000  # Process logs in chunks
+                        from_block = last_block + 1
+
+                        while from_block <= current_block:
+                            to_block = min(from_block + chunk_size - 1, current_block)
+                            
+                            try:
+                                # Get logs for the chunk
+                                logs = await w3.eth.get_logs({
+                                    "fromBlock": from_block,
+                                    "toBlock": to_block,
+                                    "address": token_contract.address,
+                                    "topics": [
+                                        f"0x{transfer_event_signature}",
+                                        ["0x" + w3.keccak(hexstr=w3.to_hex(text=addr)).hex() for addr in receiver_addresses]
+                                    ]
+                                })
+
+                                for log in logs:
+                                    try:
+                                        # Process the Transfer event
+                                        event = token_contract.events.Transfer().process_log(log)
+                                        to_address = event.args.to.lower()
+                                        value = event.args.value
+                                        logger.info(f"Detected Transfer of {value} {token_name} to {to_address}")
+                                        
+                                        tron_address = mapping.get(to_address)
+                                        if not tron_address:
+                                            logger.error(f"No tron_address mapping found for receiver {to_address}")
+                                            continue
+
+                                        # Check if the receiver contract is deployed
+                                        code = await w3.eth.get_code(to_address)
+                                        if code in (b'', '0x', b'0x'):
+                                            logger.info(f"Receiver contract {to_address} not deployed; deploying now for tron_address {tron_address}")
+                                            deploy_receipt = await call_deploy(tron_address)
+                                            if deploy_receipt is None:
+                                                logger.error(f"Deployment failed for tron_address {tron_address}")
+                                                continue
+                                            
+                                            # Wait for deployment to propagate
+                                            await asyncio.sleep(5)
+                                            code = await w3.eth.get_code(to_address)
+                                            if code in (b'', '0x', b'0x'):
+                                                logger.error(f"Deployment did not result in contract code at {to_address}")
+                                                continue
+
+                                        # Call intron() once receiver is deployed
+                                        asyncio.create_task(call_intron(to_address))
+
+                                    except Exception as e:
+                                        logger.exception(f"Error processing transfer event: {e}")
+                                        continue
+
+                            except Exception as e:
+                                logger.exception(f"Error fetching logs for blocks {from_block}-{to_block}: {e}")
+                                # Reduce chunk size on error and retry
+                                chunk_size = max(chunk_size // 2, 100)
                                 continue
 
-                        # Now that the receiver contract is deployed, call intron().
-                        asyncio.create_task(call_intron(to_address))
-            last_block = current_block
+                            # Update last processed block
+                            await save_last_block(f"{token_name}_transfers", to_block)
+                            from_block = to_block + 1
+
         except Exception as e:
             logger.exception(f"Error while polling transfers: {e}")
-        await asyncio.sleep(10)  # Poll every 10 seconds.
+        
+        await asyncio.sleep(2)  # Poll every 2 seconds
 
 # ---------------------------
 # App Initialization
@@ -266,13 +341,14 @@ async def init_app():
     return app
 
 async def main():
+    await setup_database()
     await setup_contracts()
     app = await init_app()
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, '0.0.0.0', 80)
     await site.start()
-    logger.info("Server started at http://0.0.0.0:8080")
+    logger.info("Server started at http://0.0.0.0:80")
     asyncio.create_task(poll_transfers())
     while True:
         await asyncio.sleep(3600)

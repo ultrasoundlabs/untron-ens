@@ -2,7 +2,7 @@
 src = "src"
 out = "out"
 dot_env = ".env"
-dependencies = ["pcaversaccio/snekmate", "ultrasoundlabs/untron-intents"]
+dependencies = ["pcaversaccio/snekmate"]
 
 [networks.pyevm]
 is_zksync = false
@@ -17,6 +17,10 @@ chain_id = 31337
 url = "https://ethereum-sepolia-rpc.publicnode.com"
 chain_id = 11155111
 
+[networks.base-sepolia]
+url = "https://sepolia.base.org"
+chain_id = 84532
+
 [networks.zksync-sepolia]
 url = "https://sepolia.era.zksync.dev"
 chain_id = 300
@@ -24,6 +28,7 @@ is_zksync = true
 prompt_live = true
 
 [networks.contracts]
-UntronResolver = {  deployer_script = "deploy.py" }
+UntronResolver = {  deployer_script = "deploy_resolver.py" }
+UntronReceiverFactory = { deployer_script = "deploy_receiver_factory.py" }
 
 # You can view all configuration options at https://cyfrin.github.io/moccasin/all_moccasin_toml_parameters.html
