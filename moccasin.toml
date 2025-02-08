@@ -2,7 +2,7 @@
 src = "src"
 out = "out"
 dot_env = ".env"
-dependencies = ["pcaversaccio/snekmate"]
+dependencies = ["pcaversaccio/snekmate", "ultrasoundlabs/untron-intents"]
 
 [networks.pyevm]
 is_zksync = false
