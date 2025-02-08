@@ -2,26 +2,41 @@
 # @license MIT
 
 from pcaversaccio.snekmate.src.snekmate.auth import ownable
+from interfaces import UntronResolver
+from interfaces import ReceiverFactory
 
 initializes: ownable
+implements: UntronResolver
 
 urls: public(DynArray[String[1024], 16])
-
-@external
-def popUrl() -> String[1024]:
-    assert msg.sender == ownable.owner, "unauthorized"
-    return self.urls.pop()
-
-@external
-def pushUrl(url: String[1024]):
-    assert msg.sender == ownable.owner, "unauthorized"
-    self.urls.append(url)
+receiverFactory: public(ReceiverFactory)
 
 @deploy
 def __init__():
     ownable.__init__()
 
+@internal
+@view
+def _onlyOwner():
+    assert msg.sender == ownable.owner, "unauthorized"
+
 @external
+def popUrl() -> String[1024]:
+    self._onlyOwner()
+    return self.urls.pop()
+
+@external
+def pushUrl(url: String[1024]):
+    self._onlyOwner()
+    self.urls.append(url)
+
+@external
+def setReceiverFactory(receiverFactory: ReceiverFactory):
+    self._onlyOwner()
+    self.receiverFactory = receiverFactory
+
+@external
+@view
 def supportsInterface(interfaceID: bytes4) -> bool:
     if interfaceID == method_id("supportsInterface(bytes4)", output_type=bytes4):
         return True
@@ -33,10 +48,12 @@ def supportsInterface(interfaceID: bytes4) -> bool:
 
 # i'm not sure if this one is necessary since we ask for the wildcard resolution
 @external
+@view
 def addr(node: bytes32) -> address:
     return ownable.owner
 
 @internal
+@pure
 def base58IndexOf(char: uint256) -> uint256:
     if char >= 49 and char <= 57:
         return char - 49
@@ -53,6 +70,7 @@ def base58IndexOf(char: uint256) -> uint256:
     raise "Invalid base58 character"
 
 @internal
+@pure
 def base58CheckIntoRawTronAddress(name: Bytes[64], length: uint256) -> bytes20:
     num: uint256 = 0
 
@@ -72,6 +90,7 @@ def base58CheckIntoRawTronAddress(name: Bytes[64], length: uint256) -> bytes20:
     return convert(slice(value, 1, 20), bytes20)
 
 @external
+@view
 def resolve(name: Bytes[64], data: Bytes[1024]) -> Bytes[32]:
 
     # ask to ping the relayer to bruteforce the case of the lowercased Tron address
@@ -90,6 +109,7 @@ def resolve(name: Bytes[64], data: Bytes[1024]) -> Bytes[32]:
     )
 
 @internal
+@view
 def extractSubdomain(fullDomain: Bytes[64]) -> (Bytes[64], uint256):
     # ENS encodes the domains in DNS wire format, which is a set of length-prefixed strings
     subdomainLength: uint256 = convert(slice(fullDomain, 0, 1), uint256)
@@ -100,6 +120,7 @@ def extractSubdomain(fullDomain: Bytes[64]) -> (Bytes[64], uint256):
     return subdomain, subdomainLength
 
 @internal
+@view
 def isThisJustLowercase(string: Bytes[64], lowercasedString: Bytes[64]) -> bool:
     for i: uint256 in range(len(string), bound=64):
         leftLetter: uint256 = convert(slice(string, i, 1), uint256)
@@ -109,6 +130,7 @@ def isThisJustLowercase(string: Bytes[64], lowercasedString: Bytes[64]) -> bool:
     return True
 
 @external
+@view
 def untronSubdomain(serverResponse: Bytes[64], originalDomain: Bytes[64]) -> Bytes[32]:
     
     serverTronAddress: Bytes[64] = b""
@@ -118,4 +140,4 @@ def untronSubdomain(serverResponse: Bytes[64], originalDomain: Bytes[64]) -> Byt
     serverTronAddress, serverTronAddressLength = self.extractSubdomain(serverResponse)
     tronAddress: bytes20 = self.base58CheckIntoRawTronAddress(serverTronAddress, serverTronAddressLength)
 
-    return abi_encode(convert(tronAddress, address))
+    return abi_encode(staticcall self.receiverFactory.generateReceiverAddress(tronAddress))

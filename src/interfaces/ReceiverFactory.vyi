@@ -1,0 +1,11 @@
+# pragma version 0.4.0
+# @license MIT
+
+@external
+def deploy(destinationTronAddress: bytes20) -> address:
+    ...
+
+@external
+@view
+def generateReceiverAddress(destinationTronAddress: bytes20) -> address:
+    ...

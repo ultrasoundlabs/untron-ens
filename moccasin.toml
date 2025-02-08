@@ -24,6 +24,6 @@ is_zksync = true
 prompt_live = true
 
 [networks.contracts]
-UntronResolver = {  deployer_script = "deploy_untron_resolver.py" }
+UntronResolver = {  deployer_script = "deploy.py" }
 
 # You can view all configuration options at https://cyfrin.github.io/moccasin/all_moccasin_toml_parameters.html
