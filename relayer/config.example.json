@@ -1,0 +1,5 @@
+{
+    "factory_address": "0xYourFactoryAddress",
+    "private_key": "0xYourPrivateKey",
+    "rpc_url": "http://localhost:8545"
+}

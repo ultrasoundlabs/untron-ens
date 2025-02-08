@@ -1,5 +1,5 @@
 import pytest
-from script.deploy_untron_resolver import deploy
+from script.deploy import deploy
 
 @pytest.fixture
 def untron_resolver_contract():
