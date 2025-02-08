@@ -1,6 +1,6 @@
 import pytest
-from script.deploy import deploy
+from script.deploy_receiver_factory import deploy
 
 @pytest.fixture
-def untron_resolver_contract():
+def untron_receiver_factory_contract():
     return deploy()
