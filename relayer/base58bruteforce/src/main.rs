@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 use sha2::{Sha256, Digest};
-use std::time::Instant;
+use std::env;
 
 // The Bitcoin Base58 alphabet (note that 0, O, I, and l are omitted)
 const BASE58_ALPHABET: &[u8] =
@@ -109,19 +109,20 @@ fn generate_candidate_with_mask(input: &str, mask: usize) -> String {
 }
 
 fn main() {
-    let start_time = Instant::now();
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <ambiguous-base58-string>", args[0]);
+        std::process::exit(1);
+    }
 
-    // Change this to your ambiguous Base58 string
-    let input = "tevr7jcirofduu2wtqsmwlbr1m132a3s5j";
+    let input = &args[1];
 
     // Count letters for mask generation
     let num_letters = input.chars().filter(|c| c.is_alphabetic()).count();
     let total = 1 << num_letters;
 
-    println!("Processing {} possible candidates...", total);
-
     // Lazily generate and process candidates in parallel
-    if let Some((cand, decoded)) = (0..total)
+    if let Some((cand, _)) = (0..total)
         .into_par_iter()
         .find_map_any(|mask| {
             let candidate = generate_candidate_with_mask(input, mask);
@@ -132,12 +133,6 @@ fn main() {
             }
         })
     {
-        println!("Found valid candidate: {}", cand);
-        println!("Decoded bytes: {:?}", decoded);
-    } else {
-        println!("No valid candidate found.");
+        println!("{}", cand);
     }
-
-    let elapsed = start_time.elapsed();
-    println!("Time taken: {:.2} seconds", elapsed.as_secs_f64());
 }
