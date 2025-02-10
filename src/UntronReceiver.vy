@@ -24,14 +24,12 @@ interface IERC20:
 destinationTronAddress: public(bytes20)
 flexSwapper: public(address)
 untronTransfers: public(address)
-usdt: public(immutable(address))
-usdc: public(immutable(address))
+usdt: public(address)
+usdc: public(address)
 
 @deploy
-def __init__(_usdt: address, _usdc: address):
+def __init__():
     ownable.__init__()
-    usdt = _usdt
-    usdc = _usdc
 
 @internal
 @view
@@ -55,13 +53,23 @@ def setUntronTransfers(untronTransfers: address):
     self.untronTransfers = untronTransfers
 
 @external
+def setUsdt(usdt: address):
+    self._onlyOwner()
+    self.usdt = usdt
+
+@external
+def setUsdc(usdc: address):
+    self._onlyOwner()
+    self.usdc = usdc
+
+@external
 def swapIntoUsdc(_token: address, extraData: Bytes[16384]):
     token: IERC20 = IERC20(_token)
 
     if staticcall token.allowance(self, self.flexSwapper) == 0:
         extcall token.approve(self.flexSwapper, max_value(uint256))
 
-    extcall IDaimoFlexSwapper(self.flexSwapper).swapToCoin(_token, staticcall token.balanceOf(self), usdc, extraData)
+    extcall IDaimoFlexSwapper(self.flexSwapper).swapToCoin(_token, staticcall token.balanceOf(self), self.usdc, extraData)
 
 @internal
 def _constructSwapData(amount: uint256) -> bytes32:
@@ -70,8 +78,8 @@ def _constructSwapData(amount: uint256) -> bytes32:
 
 @external
 def intron():
-    usdtBalance: uint256 = staticcall IERC20(usdt).balanceOf(self)
-    usdcBalance: uint256 = staticcall IERC20(usdc).balanceOf(self)
+    usdtBalance: uint256 = staticcall IERC20(self.usdt).balanceOf(self)
+    usdcBalance: uint256 = staticcall IERC20(self.usdc).balanceOf(self)
     if usdtBalance > 0:
         swapData: bytes32 = self._constructSwapData(usdtBalance)
         extcall IUntronTransfers(self.untronTransfers).compactUsdt(swapData)
