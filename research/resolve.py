@@ -5,13 +5,13 @@ import os
 # Connect to an Ethereum node with the mitmproxy certificate
 w3 = Web3(Web3.HTTPProvider(
     'https://ethereum-sepolia-rpc.publicnode.com',
-    request_kwargs={
-        'verify': os.path.expanduser('~/.mitmproxy/mitmproxy-ca-cert.pem'),
-        'proxies': {
-            'https': 'http://127.0.0.1:8080',
-            'http': 'http://127.0.0.1:8080'
-        }
-    }
+    # request_kwargs={
+    #     'verify': os.path.expanduser('~/.mitmproxy/mitmproxy-ca-cert.pem'),
+    #     'proxies': {
+    #         'https': 'http://127.0.0.1:8080',
+    #         'http': 'http://127.0.0.1:8080'
+    #     }
+    # }
 ))
 ns = ENS.from_web3(w3)
 
