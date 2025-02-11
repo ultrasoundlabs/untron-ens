@@ -15,5 +15,5 @@ w3 = Web3(Web3.HTTPProvider(
 ))
 ns = ENS.from_web3(w3)
 
-resolved = ns.address("TEVr7jCiRofduU2wtQsMWLBr1m132A3S5j.totron.eth")
+resolved = ns.address("TDWrw2Ra3tBCQjWwzFf387Z57bLrYq7YTr.totron.eth")
 print(resolved)

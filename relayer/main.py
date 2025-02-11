@@ -113,6 +113,16 @@ async def setup_database():
                 resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Create case_fixes table
+        logger.info("Creating case_fixes table if not exists")
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS case_fixes (
+                original_address TEXT PRIMARY KEY,
+                fixed_address TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
         logger.info("Database setup complete")
 
@@ -121,17 +131,42 @@ async def setup_database():
 # ---------------------------
 async def fix_case(address: str) -> str:
     """
-    Fixes the case of a Base58 address by running the base58bruteforce program
-    and capturing its output.
+    Fixes the case of a Base58 address by first checking the cache,
+    and if not found, running the base58bruteforce program.
     """
     logger.info(f"Fixing case for address: {address}")
+    
+    # First check the cache
+    async with aiosqlite.connect(DB_FILENAME) as db:
+        async with db.execute(
+            "SELECT fixed_address FROM case_fixes WHERE original_address = ?",
+            (address,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                fixed = row[0]
+                logger.info(f"Found cached case fix: {fixed}")
+                return fixed
+    
+    # If not in cache, compute it
     result = subprocess.run(["./binary", address], 
                           capture_output=True, 
                           text=True)
     if result.stdout:
         fixed = result.stdout.strip()
         logger.info(f"Fixed case result: {fixed}")
+        
+        # Store in cache
+        async with aiosqlite.connect(DB_FILENAME) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO case_fixes (original_address, fixed_address) VALUES (?, ?)",
+                (address, fixed)
+            )
+            await db.commit()
+            logger.info(f"Cached case fix for {address}")
+        
         return fixed
+    
     logger.warning("No output from case fixing binary")
     return ""
 
