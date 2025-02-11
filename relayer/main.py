@@ -319,6 +319,7 @@ async def poll_transfers():
     logger.info(f"Transfer event signature: {transfer_event_signature}")
 
     while True:
+        print("run")
         try:
             # Retrieve current mappings: key = receiver_address, value = tron_address
             async with aiosqlite.connect(DB_FILENAME) as db:
@@ -326,11 +327,13 @@ async def poll_transfers():
                     rows = await cursor.fetchall()
                     mapping = {row[1]: row[0] for row in rows}
                     receiver_addresses = list(mapping.keys())
+                    print(receiver_addresses)
                     if len(receiver_addresses) > 0:
                         logger.info(f"Found {len(receiver_addresses)} receiver addresses to monitor")
 
             if receiver_addresses:
                 for token_contract in [usdt_contract, usdc_contract]:
+                    print(token_contract)
                     token_name = "USDT" if token_contract.address == usdt_contract.address else "USDC"
                     logger.info(f"Processing {token_name} transfers")
                     
