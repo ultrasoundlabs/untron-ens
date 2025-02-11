@@ -7,8 +7,25 @@ import base58
 from web3 import AsyncWeb3, AsyncHTTPProvider
 import os
 import subprocess
+from logging.handlers import RotatingFileHandler
+import datetime
+
+# Set up logging to file
+os.makedirs("logs", exist_ok=True)
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+file_handler = RotatingFileHandler(
+    f"logs/relayer_{timestamp}.log",
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(
+    logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+)
 
 logger = logging.getLogger(__name__)
+logger.addHandler(file_handler)
+logger.setLevel(logging.INFO)
+
 logger.info("Starting application")
 
 logger.info("Changing to base58bruteforce directory")
@@ -263,22 +280,17 @@ async def call_intron(tron_address: bytes):
 
 async def save_last_block(chain_name: str, block_number: int):
     """Save the last processed block number for a given chain."""
-    logger.info(f"Saving last block {block_number} for chain {chain_name}")
     os.makedirs("backups", exist_ok=True)
     with open(f"backups/last_block_{chain_name}.txt", "w") as f:
         f.write(str(block_number))
-    logger.info(f"Saved last block {block_number} for chain {chain_name}")
 
 async def load_last_block(chain_name: str) -> int:
     """Load the last processed block number for a given chain."""
-    logger.info(f"Loading last block for chain {chain_name}")
     try:
         with open(f"backups/last_block_{chain_name}.txt", "r") as f:
             block = int(f.read().strip())
-            logger.info(f"Loaded last block {block} for chain {chain_name}")
             return block
     except FileNotFoundError:
-        logger.info(f"No last block found for chain {chain_name}, starting from 0")
         return 0
 
 def address_to_topic(address: str) -> str:
@@ -309,13 +321,13 @@ async def poll_transfers():
     while True:
         try:
             # Retrieve current mappings: key = receiver_address, value = tron_address
-            logger.info("Retrieving current receiver mappings from database")
             async with aiosqlite.connect(DB_FILENAME) as db:
                 async with db.execute("SELECT tron_address, receiver_address FROM receivers") as cursor:
                     rows = await cursor.fetchall()
                     mapping = {row[1]: row[0] for row in rows}
                     receiver_addresses = list(mapping.keys())
-                    logger.info(f"Found {len(receiver_addresses)} receiver addresses to monitor")
+                    if len(receiver_addresses) > 0:
+                        logger.info(f"Found {len(receiver_addresses)} receiver addresses to monitor")
 
             if receiver_addresses:
                 for token_contract in [usdt_contract, usdc_contract]:
@@ -325,7 +337,6 @@ async def poll_transfers():
                     # Load last processed block
                     last_block = await load_last_block(f"{token_name}_transfers") or await w3.eth.block_number
                     current_block = await w3.eth.block_number
-                    logger.info(f"Last processed block: {last_block}, current block: {current_block}")
 
                     if current_block > last_block:
                         chunk_size = 1000  # Process logs in chunks
@@ -348,7 +359,6 @@ async def poll_transfers():
                                         [address_to_topic(x) for x in receiver_addresses]
                                     ]
                                 })
-                                logger.info(f"Found {len(logs)} transfer logs")
 
                                 for log in logs:
                                     try:
@@ -379,14 +389,12 @@ async def poll_transfers():
                                 continue
 
                             # Update last processed block
-                            logger.info(f"Updating last processed block to {to_block}")
                             await save_last_block(f"{token_name}_transfers", to_block)
                             from_block = to_block + 1
 
         except Exception as e:
             logger.exception(f"Error while polling transfers: {e}")
         
-        logger.info("Sleeping for 2 seconds before next polling iteration")
         await asyncio.sleep(2)  # Poll every 2 seconds
 
 # ---------------------------
