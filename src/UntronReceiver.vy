@@ -1,89 +1,63 @@
 # pragma version 0.4.0
 # @license MIT
 
-from pcaversaccio.snekmate.src.snekmate.auth import ownable
+from ethereum.ercs import IERC20
 from interfaces import UntronReceiver
-# from ultrasoundlabs.untron_intents.src import UntronTransfers # not sure why not working
+from interfaces.external import UntronTransfers
+from interfaces.external import DaimoFlexSwapper
 
-initializes: ownable
 implements: UntronReceiver
 
-# TO BE IMPORTED FROM UNTRON_INTENTS WHEN I FIGURE OUT HOW TO IMPORT IT
-interface IUntronTransfers:
-    def compactUsdt(swapData: bytes32): nonpayable
-    def compactUsdc(swapData: bytes32): nonpayable
-
-interface IDaimoFlexSwapper:
-    def swapToCoin(tokenIn: address, amountIn: uint256, tokenOut: address, extraData: Bytes[16384]) -> uint256: nonpayable
-
-interface IERC20:
-    def approve(spender: address, amount: uint256) -> bool: nonpayable
-    def balanceOf(owner: address) -> uint256: view
-    def allowance(owner: address, spender: address) -> uint256: view
-
+initialized: bool
 destinationTronAddress: public(bytes20)
-flexSwapper: public(address)
-untronTransfers: public(address)
-usdt: public(address)
-usdc: public(address)
+deployer: address # not ownable bc cleaner
 
-@deploy
-def __init__():
-    ownable.__init__()
+@external
+def initialize(destinationTronAddress: bytes20):
+    assert not self.initialized, "already initialized"
+    self.deployer = msg.sender
+    self.destinationTronAddress = destinationTronAddress
+    self.initialized = True
 
 @internal
 @view
-def _onlyOwner():
-    assert msg.sender == ownable.owner, "unauthorized"
+def _onlyDeployer():
+    assert msg.sender == self.deployer, "unauthorized"
 
 @external
-def setTronAddress(tronAddress: bytes20):
-    self._onlyOwner()
-    assert self.destinationTronAddress == empty(bytes20), "destinationTronAddress already set"
-    self.destinationTronAddress = tronAddress
-
-@external
-def setFlexSwapper(flexSwapper: address):
-    self._onlyOwner()
-    self.flexSwapper = flexSwapper
-
-@external
-def setUntronTransfers(untronTransfers: address):
-    self._onlyOwner()
-    self.untronTransfers = untronTransfers
-
-@external
-def setUsdt(usdt: address):
-    self._onlyOwner()
-    self.usdt = usdt
-
-@external
-def setUsdc(usdc: address):
-    self._onlyOwner()
-    self.usdc = usdc
-
-@external
-def swapIntoUsdc(_token: address, extraData: Bytes[16384]):
+def swapIntoUsdc(flexSwapper: address, _token: address, usdc: address, extraData: Bytes[16384]):
+    self._onlyDeployer()
     token: IERC20 = IERC20(_token)
-
-    if staticcall token.allowance(self, self.flexSwapper) == 0:
-        extcall token.approve(self.flexSwapper, max_value(uint256))
-
-    extcall IDaimoFlexSwapper(self.flexSwapper).swapToCoin(_token, staticcall token.balanceOf(self), self.usdc, extraData)
+    
+    if _token != empty(address):
+        _balance: uint256 = staticcall token.balanceOf(self)
+        extcall token.approve(flexSwapper, _balance)
+        extcall DaimoFlexSwapper(flexSwapper).swapToCoin(_token, _balance, usdc, extraData) 
+    else:
+        extcall DaimoFlexSwapper(flexSwapper).swapToCoin(_token, self.balance, usdc, extraData, value=self.balance)
+    
 
 @internal
+@view
 def _constructSwapData(amount: uint256) -> bytes32:
     # output amount (6-12th bytes) is 0 so that Untron Transfers contract uses the recommended one
     return convert((amount << 208) | convert(convert(self.destinationTronAddress, uint160), uint256), bytes32)
 
 @external
-def intron():
-    usdtBalance: uint256 = staticcall IERC20(self.usdt).balanceOf(self)
-    usdcBalance: uint256 = staticcall IERC20(self.usdc).balanceOf(self)
-    if usdtBalance > 0:
-        swapData: bytes32 = self._constructSwapData(usdtBalance)
-        extcall IUntronTransfers(self.untronTransfers).compactUsdt(swapData)
+def intron(_usdt: address, _usdc: address, untronTransfers: address):
+    self._onlyDeployer()
 
+    usdt: IERC20 = IERC20(_usdt)
+    usdc: IERC20 = IERC20(_usdc)
+
+    usdtBalance: uint256 = staticcall usdt.balanceOf(self)
+    if usdtBalance > 0:
+        extcall usdt.approve(untronTransfers, usdtBalance)
+        swapData: bytes32 = self._constructSwapData(usdtBalance)
+        extcall UntronTransfers(untronTransfers).compactUsdt(swapData)
+
+    usdcBalance: uint256 = staticcall usdc.balanceOf(self)
     if usdcBalance > 0:
+        extcall usdc.approve(untronTransfers, usdcBalance)
         swapData: bytes32 = self._constructSwapData(usdcBalance)
-        extcall IUntronTransfers(self.untronTransfers).compactUsdc(swapData)
+        extcall UntronTransfers(untronTransfers).compactUsdc(swapData)

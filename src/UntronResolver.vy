@@ -7,6 +7,7 @@ from interfaces import ReceiverFactory
 
 initializes: ownable
 implements: UntronResolver
+exports: ownable.transfer_ownership
 
 urls: public(DynArray[String[1024], 16])
 receiverFactory: public(ReceiverFactory)
@@ -15,24 +16,19 @@ receiverFactory: public(ReceiverFactory)
 def __init__():
     ownable.__init__()
 
-@internal
-@view
-def _onlyOwner():
-    assert msg.sender == ownable.owner, "unauthorized"
-
 @external
 def popUrl() -> String[1024]:
-    self._onlyOwner()
+    ownable._check_owner()
     return self.urls.pop()
 
 @external
 def pushUrl(url: String[1024]):
-    self._onlyOwner()
+    ownable._check_owner()
     self.urls.append(url)
 
 @external
 def setReceiverFactory(receiverFactory: ReceiverFactory):
-    self._onlyOwner()
+    ownable._check_owner()
     self.receiverFactory = receiverFactory
 
 @external

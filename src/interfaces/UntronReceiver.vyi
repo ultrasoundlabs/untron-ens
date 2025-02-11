@@ -2,21 +2,13 @@
 # @license MIT
 
 @external
-def setTronAddress(destinationTronAddress: bytes20):
+def initialize(destinationTronAddress: bytes20):
     ...
 
 @external
-def setFlexSwapper(flexSwapper: address):
+def swapIntoUsdc(flexSwapper: address, _token: address, usdc: address, extraData: Bytes[16384]):
     ...
 
 @external
-def setUntronTransfers(untronTransfers: address):
-    ...
-
-@external
-def swapIntoUsdc(_token: address, extraData: Bytes[16384]):
-    ...
-
-@external
-def intron():
+def intron(usdt: address, usdc: address, untronTransfers: address):
     ...
