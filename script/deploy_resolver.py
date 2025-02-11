@@ -2,8 +2,9 @@ from src import UntronResolver
 
 def deploy():
     resolver = UntronResolver.deploy()
-    resolver.setReceiverFactory("0x48FF9AAc987feb040D7846c8F4C5Cc794bfe3869")
-    resolver.pushUrl("https://bba5-185-209-196-189.ngrok-free.app/resolve")
+    resolver.setReceiverFactory("0x3B26Cb623edD3F9b1e9e5d4cD60aDc86B48E6D73")
+    resolver.pushUrl("https://untron.finance/api/ens/resolve")
+    resolver.transfer_ownership("0xf178905915f55dd34Ba1980942354dc64109118F")
 
     return resolver
 

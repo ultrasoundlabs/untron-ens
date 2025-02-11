@@ -36,17 +36,9 @@ def setReceiverFactory(receiverFactory: ReceiverFactory):
 def supportsInterface(interfaceID: bytes4) -> bool:
     if interfaceID == method_id("supportsInterface(bytes4)", output_type=bytes4):
         return True
-    if interfaceID == method_id("addr(bytes32)", output_type=bytes4):
-        return True
     if interfaceID == method_id("resolve(bytes,bytes)", output_type=bytes4):
         return True
     return False
-
-# i'm not sure if this one is necessary since we ask for the wildcard resolution
-@external
-@view
-def addr(node: bytes32) -> address:
-    return ownable.owner
 
 @internal
 @pure

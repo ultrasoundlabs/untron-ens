@@ -407,9 +407,9 @@ async def main():
     app = await init_app()
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 80)
+    site = web.TCPSite(runner, '0.0.0.0', 8454)
     await site.start()
-    logger.info("Server started at http://0.0.0.0:80")
+    logger.info("Server started at http://0.0.0.0:8454")
     logger.info("Starting transfer polling task")
     asyncio.create_task(poll_transfers())
     while True:

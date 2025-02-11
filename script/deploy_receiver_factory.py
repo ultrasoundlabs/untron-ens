@@ -15,6 +15,7 @@ def deploy():
     receiverFactory.setUntronTransfers(untronTransfers)
     receiverFactory.setUsdt(usdt)
     receiverFactory.setUsdc(usdc)
+    receiverFactory.transfer_ownership("0xf178905915f55dd34Ba1980942354dc64109118F")
     
     # resolver = UntronResolver.deploy()
     # resolver.setReceiverFactory(receiverFactory)

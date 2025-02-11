@@ -16,10 +16,10 @@ def pushUrl(url: String[1024]):
 def supportsInterface(interfaceID: bytes4) -> bool:
     ...
 
-@external
-@view
-def addr(node: bytes32) -> address:
-    ...
+# @external
+# @view
+# def addr(node: bytes32) -> address:
+#     ...
 
 @external
 @view
