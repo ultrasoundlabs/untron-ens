@@ -4,7 +4,7 @@ import os
 
 # Connect to an Ethereum node with the mitmproxy certificate
 w3 = Web3(Web3.HTTPProvider(
-    'https://ethereum-sepolia-rpc.publicnode.com',
+    'https://rpc.ankr.com/eth',
     # request_kwargs={
     #     'verify': os.path.expanduser('~/.mitmproxy/mitmproxy-ca-cert.pem'),
     #     'proxies': {

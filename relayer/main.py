@@ -62,23 +62,18 @@ logger.info(f"Initializing factory contract at address: {CONFIG['factory_address
 factory_contract = w3.eth.contract(address=CONFIG["factory_address"], abi=FACTORY_ABI)
 
 # Global contract variables
-implementation_contract = None
 usdt_contract = None
 usdc_contract = None
 
 async def setup_contracts():
-    global implementation_contract, usdt_contract, usdc_contract
+    global usdt_contract, usdc_contract
     logger.info("Setting up contract instances")
-    
-    implementation_address = await factory_contract.functions.receiverImplementation().call()
-    logger.info(f"Implementation contract address: {implementation_address}")
-    implementation_contract = w3.eth.contract(address=implementation_address, abi=RECEIVER_ABI)
 
-    usdt_address = await implementation_contract.functions.usdt().call()
+    usdt_address = await factory_contract.functions.usdt().call()
     logger.info(f"USDT contract address: {usdt_address}")
     usdt_contract = w3.eth.contract(address=usdt_address, abi=ERC20_ABI)
 
-    usdc_address = await implementation_contract.functions.usdc().call()
+    usdc_address = await factory_contract.functions.usdc().call()
     logger.info(f"USDC contract address: {usdc_address}")
     usdc_contract = w3.eth.contract(address=usdc_address, abi=ERC20_ABI)
 
@@ -210,21 +205,19 @@ async def list_receivers(request: web.Request):
 # ---------------------------
 # Blockchain Interaction
 # ---------------------------
-async def call_deploy(tron_address: str):
+async def call_deploy(tron_address: bytes):
     """
     Calls the factory contract's deploy(destinationTronAddress: bytes20) function.
     """
     logger.info(f"Deploying receiver for Tron address: {tron_address}")
     try:
-        tron_bytes = bytes.fromhex(tron_address[2:]) if tron_address.startswith("0x") else base58.b58decode_check(tron_address)[1:]
-        logger.info(f"Decoded Tron address bytes: {tron_bytes.hex()}")
         nonce = await w3.eth.get_transaction_count(account.address)
         logger.info(f"Got nonce: {nonce}")
         gas_price = await w3.eth.gas_price
         logger.info(f"Got gas price: {gas_price}")
-        tx = await factory_contract.functions.deploy(tron_bytes).build_transaction({
+        tx = await factory_contract.functions.deploy(tron_address).build_transaction({
             "chainId": await w3.eth.chain_id,
-            "gas": 300000,  # Adjust gas limit as needed.
+            "gas": 500000,  # Adjust gas limit as needed.
             "gasPrice": gas_price,
             "nonce": nonce,
         })
@@ -240,20 +233,19 @@ async def call_deploy(tron_address: str):
         logger.exception(f"Error calling deploy() for tron_address {tron_address}: {e}")
         return None
 
-async def call_intron(receiver_address: str):
+async def call_intron(tron_address: bytes):
     """
     Calls the intron() function on the receiver contract at the given address.
     """
-    logger.info(f"Calling intron() on receiver: {receiver_address}")
+    logger.info(f"Calling intron() into {tron_address.hex()} Tron address")
     try:
-        receiver_contract = w3.eth.contract(address=receiver_address, abi=RECEIVER_ABI)
         nonce = await w3.eth.get_transaction_count(account.address)
         logger.info(f"Got nonce: {nonce}")
         gas_price = await w3.eth.gas_price
         logger.info(f"Got gas price: {gas_price}")
-        tx = await receiver_contract.functions.intron().build_transaction({
+        tx = await factory_contract.functions.intron(tron_address).build_transaction({
             "chainId": await w3.eth.chain_id,
-            "gas": 300000,
+            "gas": 500000,
             "gasPrice": gas_price,
             "nonce": nonce,
         })
@@ -261,12 +253,12 @@ async def call_intron(receiver_address: str):
         signed_tx = account.sign_transaction(tx)
         logger.info("Transaction signed")
         tx_hash = await w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        logger.info(f"Called intron() on {receiver_address}, tx hash: {tx_hash.hex()}")
+        logger.info(f"Called intron() on {tron_address}, tx hash: {tx_hash.hex()}")
         receipt = await w3.eth.wait_for_transaction_receipt(tx_hash)
         logger.info(f"Transaction receipt: {receipt}")
         return receipt
     except Exception as e:
-        logger.exception(f"Error calling intron() on {receiver_address}: {e}")
+        logger.exception(f"Error calling intron() on {tron_address}: {e}")
         return None
 
 async def save_last_block(chain_name: str, block_number: int):
@@ -366,31 +358,14 @@ async def poll_transfers():
                                         value = event.args.value
                                         logger.info(f"Detected Transfer of {value} {token_name} to {to_address}")
                                         
-                                        tron_address = mapping.get(to_address)
+                                        tron_address = base58.b58decode_check(mapping.get(to_address))[1:]
                                         if not tron_address:
                                             logger.error(f"No tron_address mapping found for receiver {to_address}")
                                             continue
 
-                                        # Check if the receiver contract is deployed
-                                        code = await w3.eth.get_code(to_address)
-                                        if code in (b'', '0x', b'0x'):
-                                            logger.info(f"Receiver contract {to_address} not deployed; deploying now for tron_address {tron_address}")
-                                            deploy_receipt = await call_deploy(tron_address)
-                                            if deploy_receipt is None:
-                                                logger.error(f"Deployment failed for tron_address {tron_address}")
-                                                continue
-                                            
-                                            # Wait for deployment to propagate
-                                            logger.info("Waiting for deployment to propagate")
-                                            await asyncio.sleep(5)
-                                            code = await w3.eth.get_code(to_address)
-                                            if code in (b'', '0x', b'0x'):
-                                                logger.error(f"Deployment did not result in contract code at {to_address}")
-                                                continue
-
-                                        # Call intron() once receiver is deployed
+                                        # Call intron()
                                         logger.info(f"Creating task to call intron() on {to_address}")
-                                        asyncio.create_task(call_intron(to_address))
+                                        asyncio.create_task(call_intron(tron_address))
 
                                     except Exception as e:
                                         logger.exception(f"Error processing transfer event: {e}")
