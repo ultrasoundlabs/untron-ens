@@ -2,8 +2,8 @@ from src import UntronResolver
 
 def deploy():
     resolver = UntronResolver.deploy()
-    resolver.setReceiverFactory("0xA17ff8aFe3a671BEa5340bcaE9F45AB28cB8e9D4")
-    resolver.pushUrl("https://8ac3-194-36-25-30.ngrok-free.app/resolve")
+    resolver.setReceiverFactory("0x48FF9AAc987feb040D7846c8F4C5Cc794bfe3869")
+    resolver.pushUrl("https://bba5-185-209-196-189.ngrok-free.app/resolve")
 
     return resolver
 

@@ -2,16 +2,19 @@ from src import ReceiverFactory
 from src import UntronReceiver
 
 def deploy():
-    usdt = "0xd07308A887ffA74b8965C0F26e6E2e70072C97b9"
-    usdc = "0xd07308A887ffA74b8965C0F26e6E2e70072C97b9"
-    flexSwapper = "0x0000000000000000000000000000000000000000" # fake address
-    untronTransfers = "0x0000000000000000000000000000000000000000"
+    usdt = "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2"
+    usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    # flexSwapper = "0x0000000000000000000000000000000000000000" # fake address
+    untronTransfers = "0x8d2Db6153188b002fc2E662538948Be3C5aE65F7"
 
-    receiver = UntronReceiver.deploy(usdt, usdc)
-    receiver.setFlexSwapper(flexSwapper)
-    receiver.setUntronTransfers(untronTransfers)
+    receiver = UntronReceiver.deploy()
 
-    receiverFactory = ReceiverFactory.deploy(receiver)
+    receiverFactory = ReceiverFactory.deploy()
+    receiverFactory.setReceiverImplementation(receiver)
+    # receiverFactory.setFlexSwapper(flexSwapper)
+    receiverFactory.setUntronTransfers(untronTransfers)
+    receiverFactory.setUsdt(usdt)
+    receiverFactory.setUsdc(usdc)
     
     # resolver = UntronResolver.deploy()
     # resolver.setReceiverFactory(receiverFactory)

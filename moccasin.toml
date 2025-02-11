@@ -13,9 +13,17 @@ prompt_live = false
 save_to_db = false
 chain_id = 31337
 
+[networks.mainnet]
+url = "https://rpc.ankr.com/eth"
+chain_id = 1
+
 [networks.sepolia]
 url = "https://ethereum-sepolia-rpc.publicnode.com"
 chain_id = 11155111
+
+[networks.base]
+url = "https://mainnet.base.org"
+chain_id = 8453
 
 [networks.base-sepolia]
 url = "https://sepolia.base.org"
