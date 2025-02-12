@@ -182,3 +182,6 @@ anvil-zksync.log
 .DS_Store
 
 config.json
+receivers.db
+logs/
+backups/
