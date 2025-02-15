@@ -1,15 +1,24 @@
 import logging
 from aiohttp import web
-from typing import Dict, Any
+from sqlalchemy import select
+from base58 import b58decode_check
 
-from .database import store_resolved_pair, get_all_receivers, get_case_fix, store_case_fix
-from .blockchain import client
-from .utils import run_case_fix_binary, validate_tron_address, decode_tron_address
+from .database import get_session
+from .database.models import Receiver, CaseFix
+from .blockchain.ethereum import ethereum
+from .utils import run_case_fix_binary
+from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 
+routes = web.RouteTableDef()
+
+@routes.post("/resolve")
 async def resolve_handler(request: web.Request) -> web.Response:
-    """Handle /resolve endpoint."""
+    """
+    Handle CCIP-Read resolution requests.
+    Expects POST request with JSON body containing hex-encoded domain data.
+    """
     logger.info("=== Starting new resolve request ===")
     try:
         data = await request.json()
@@ -33,58 +42,74 @@ async def resolve_handler(request: web.Request) -> web.Response:
                 status=400
             )
             
-        # Extract Tron address from domain data
-        lowercased_tron_address = domain[1:domain[0]+1].decode().lower()
+        # Extract Tron address from domain data (DNS wire format)
+        subdomain_length = domain[0]
+        lowercased_tron_address = domain[1:subdomain_length+1].decode().lower()
         logger.info(f"Extracted Tron address from domain: {lowercased_tron_address}")
         
-        if not validate_tron_address(lowercased_tron_address):
-            logger.error(f"Invalid Tron address format: {lowercased_tron_address}")
-            return web.json_response(
-                {"message": "Invalid Tron address format"},
-                status=400
-            )
-            
         # Check cache for case fix
-        fixed_tron_address = await get_case_fix(lowercased_tron_address)
-        if fixed_tron_address:
-            logger.info(f"Found cached case fix: {lowercased_tron_address} -> {fixed_tron_address}")
-        else:
-            logger.info(f"No cached case fix found for {lowercased_tron_address}, running binary...")
-            # Run case fix binary if not in cache
-            fixed_tron_address = await run_case_fix_binary(lowercased_tron_address)
-            if fixed_tron_address:
-                logger.info(f"Successfully fixed case: {lowercased_tron_address} -> {fixed_tron_address}")
-                await store_case_fix(lowercased_tron_address, fixed_tron_address)
-            else:
-                logger.error(f"Failed to fix case for address: {lowercased_tron_address}")
-                return web.json_response(
-                    {"message": "Failed to process Tron address"},
-                    status=500
-                )
-                
-        # Generate receiver address
-        tron_bytes = decode_tron_address(fixed_tron_address)
-        if not tron_bytes:
-            logger.error(f"Failed to decode fixed Tron address: {fixed_tron_address}")
-            return web.json_response(
-                {"message": "Invalid Tron address"},
-                status=400
+        async with get_session() as session:
+            case_fix = await session.execute(
+                select(CaseFix).where(CaseFix.lowercase == lowercased_tron_address)
             )
+            case_fix = case_fix.scalar_one_or_none()
             
-        logger.info(f"Generating receiver address for Tron bytes: {tron_bytes.hex()}")
-        receiver_address = await client.generate_receiver_address(tron_bytes)
-        logger.info(f"Generated receiver address: {receiver_address}")
-        
-        # Store the mapping
-        await store_resolved_pair(fixed_tron_address, receiver_address)
-        logger.info(f"Stored mapping: {fixed_tron_address} -> {receiver_address}")
-        
-        # Construct response
-        result = "0x" + (bytes([domain[0]]) + fixed_tron_address.encode() + domain[domain[0]+1:]).hex()
-        logger.info(f"=== Resolve complete: {lowercased_tron_address} -> {result} ===")
-        
-        return web.json_response({"data": result})
-        
+            if case_fix:
+                fixed_tron_address = case_fix.original
+                logger.info(f"Found cached case fix: {lowercased_tron_address} -> {fixed_tron_address}")
+            else:
+                logger.info(f"No cached case fix found for {lowercased_tron_address}, running binary...")
+                # Run case fix binary if not in cache
+                fixed_tron_address = await run_case_fix_binary(lowercased_tron_address)
+                if fixed_tron_address:
+                    logger.info(f"Successfully fixed case: {lowercased_tron_address} -> {fixed_tron_address}")
+                    session.add(CaseFix(
+                        lowercase=lowercased_tron_address,
+                        original=fixed_tron_address
+                    ))
+                    await session.commit()
+                else:
+                    logger.error(f"Failed to fix case for address: {lowercased_tron_address}")
+                    return web.json_response(
+                        {"message": "Failed to process Tron address"},
+                        status=500
+                    )
+                
+            # Decode Tron address
+            try:
+                raw_bytes = b58decode_check(fixed_tron_address)[1:]
+            except Exception as e:
+                logger.error(f"Failed to decode fixed Tron address: {fixed_tron_address} error: {e}")
+                return web.json_response(
+                    {"message": "Invalid Tron address"},
+                    status=400
+                )
+            
+            receiver_address = await ethereum.generate_receiver_address(raw_bytes)
+            
+            # Check if we have a receiver for this address
+            receiver = await session.execute(
+                select(Receiver).where(Receiver.eth_address == receiver_address)
+            )
+            receiver = receiver.scalar_one_or_none()
+            
+            if not receiver:
+                # Store new receiver mapping
+                session.add(Receiver(
+                    eth_address=receiver_address,
+                    tron_address=fixed_tron_address
+                ))
+                await session.commit()
+                logger.info(f"Generated and stored new receiver: {receiver_address} -> {fixed_tron_address}")
+            else:
+                logger.info(f"Found existing receiver: {receiver_address}")
+            
+            # Construct response in DNS wire format
+            result = "0x" + (bytes([subdomain_length]) + fixed_tron_address.encode() + domain[subdomain_length+1:]).hex()
+            logger.info(f"=== Resolve complete: {lowercased_tron_address} -> {result} ===")
+            
+            return web.json_response({"data": result})
+            
     except Exception as e:
         logger.exception(f"Unexpected error in resolve_handler: {e}")
         return web.json_response(
@@ -92,23 +117,11 @@ async def resolve_handler(request: web.Request) -> web.Response:
             status=500
         )
 
-async def list_receivers_handler(request: web.Request) -> web.Response:
-    """Handle /receivers endpoint."""
-    logger.info("=== Starting list_receivers request ===")
-    try:
-        receivers = await get_all_receivers()
-        logger.info(f"Found {len(receivers)} receiver mappings")
-        return web.json_response(receivers)
-    except Exception as e:
-        logger.exception(f"Error in list_receivers_handler: {e}")
-        return web.json_response(
-            {"message": f"Internal server error: {str(e)}"},
-            status=500
-        )
+@routes.get("/health")
+async def health_check(request):
+    """Simple health check endpoint."""
+    return web.json_response({"status": "ok"})
 
 def setup_routes(app: web.Application) -> None:
-    """Configure routes for the application."""
-    logger.info("Setting up HTTP routes")
-    app.router.add_post("/resolve", resolve_handler)
-    app.router.add_get("/receivers", list_receivers_handler)
-    logger.info("HTTP routes configured successfully")
+    """Configure routes for the web application."""
+    app.add_routes(routes)

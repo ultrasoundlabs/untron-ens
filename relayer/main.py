@@ -4,11 +4,10 @@ import os
 from aiohttp import web
 from pathlib import Path
 
-from .config import setup_logging, PROJECT_ROOT
+from .blockchain.tron import tron
 from .database import setup_database
-from .blockchain import client
 from .endpoints import setup_routes
-from .polling import poll_transfers
+from .polling.blockchain_listener import start_blockchain_listeners
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +36,9 @@ async def main() -> None:
     
     # Initialize database
     await setup_database()
-    
-    # Set up blockchain contracts
-    await client.setup_contracts()
+
+    # Initialize Tron client
+    await tron.initialize()
     
     # Initialize and start web application
     app = await init_app()
@@ -49,13 +48,18 @@ async def main() -> None:
     await site.start()
     logger.info("Server started at http://0.0.0.0:8454")
     
-    # Start transfer polling task
-    logger.info("Starting transfer polling task")
-    asyncio.create_task(poll_transfers())
-    
-    # Keep the application running
-    while True:
-        await asyncio.sleep(3600)
+    # Start blockchain event listeners
+    logger.info("Starting blockchain event listeners")
+    try:
+        # Start unified blockchain event listeners
+        await start_blockchain_listeners()
+    except asyncio.CancelledError:
+        logger.info("Shutting down event listeners")
+    except Exception as e:
+        logger.error(f"Error in main loop: {e}")
+        raise
+    finally:
+        await runner.cleanup()
 
 if __name__ == '__main__':
     try:
@@ -63,3 +67,6 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        raise
