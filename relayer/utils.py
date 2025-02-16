@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 import base58
 from pathlib import Path
 
@@ -11,6 +11,56 @@ logger = logging.getLogger(__name__)
 
 # Get the relayer directory path
 RELAYER_DIR = Path(__file__).parent.absolute()
+
+def is_profitable(chain: Dict[str, Any], token_address: str, input_amount: int, output_amount: int) -> bool:
+    """
+    Check if a transfer/order is profitable based on configured fees.
+    Uses basis points (1/10000) for percentage calculations to avoid floats.
+    Returns False if token is not in allowed list for the chain.
+    
+    Args:
+        chain: Chain configuration dictionary
+        token_address: Token contract address
+        input_amount: Amount being sent on source chain
+        output_amount: Amount to be sent on destination chain
+    """
+    # Find token config by address
+    token_config = None
+    token_symbol = None
+    for symbol, token_data in chain["tokens"].items():
+        if token_data["address"].lower() == token_address.lower():
+            token_config = token_data
+            token_symbol = symbol
+            break
+    
+    if not token_config:
+        logger.info(f"Token {token_address} not in allowed tokens list for chain {chain['name']}")
+        return False
+    
+    # Calculate total fee (static + percentage)
+    percentage_fee = (output_amount * int(token_config["percentage_fee_bps"])) // 10000
+    total_fee = int(token_config["static_fee"]) + percentage_fee
+    
+    # Transfer is profitable if input covers output plus fees
+    is_profitable = input_amount >= (output_amount + total_fee)
+
+    logger.info(
+        f"Profitability check for {token_symbol} - "
+        f"Input: {input_amount}, "
+        f"Output: {output_amount}, "
+        f"Fee: {total_fee}, "
+        f"Result: {is_profitable}"
+    )
+    
+    if not is_profitable:
+        logger.info(
+            f"[{chain['name']}] {token_symbol} transfer not profitable - "
+            f"Input: {input_amount}, "
+            f"Output: {output_amount}, "
+            f"Fee: {total_fee}"
+        )
+    
+    return is_profitable
 
 async def run_case_fix_binary(address: str) -> str:
     """Run the base58bruteforce binary asynchronously."""
@@ -68,4 +118,4 @@ def validate_tron_address(tron_address: str) -> bool:
         decode_tron_address(tron_address)
         return True
     except Exception:
-        return False
+        return False 

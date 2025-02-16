@@ -185,3 +185,6 @@ config.json
 receivers.db
 logs/
 backups/
+*.txt
+!requirements.txt
+binary
